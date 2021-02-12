@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Animation</title>
+    <meta name="google" content="notranslate"/>
+    <meta charset="UTF-8"/>
+    <meta http-equiv="Content-Type" content="text/html;charset=ISO-8859-1"/>
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="viewport" content="user-scalable=no,width=device-width, initial-scale=1.0,minimum-scale=1.0"/>
+    <meta name="theme-color" content="#d5f97a" />
+    <!--link rel="stylesheet" type="text/css" href="style.css" /-->
+    <style>
+        @font-face {
+            font-family: "Font";
+            src: url(font.ttf);
+        }
+        * {
+            font-family: "Font", "Courier New";
+            font-weight: bold;
+            overflow: hidden;
+            -webkit-tap-highlight-color: rgba(0,0,0,0)
+        }
+        body{
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-text-size-adjust: none;
+            -webkit-user-select: none
+        }
+    </style>
+</head>
+<body style="margin: 0">
+<div style="height: 100vh; display: flex; flex-direction: column">
+    <div id="header" style="padding: 20px; background-color: black; color: white; display: flex">
+        <div>Random Controls</div>
+        <img style="margin-left: 30px; width: 40px; height: 50px" src="dice.gif">
+    </div>
+    <div style="display:flex; flex-direction: row; flex: 1">
+        <div id="score" style="position:absolute; margin: 20px"></div>
+        <div>
+            <canvas class="animation" id="canvas">
+            </canvas>
+        </div>
+    </div>
+    <div id="fb-header" style="height: 100px;  background-color: black; color: white"></div>
+</div>
+<script id="vertexShader" type="x-shader/x-vertex">
+attribute vec4 position;
+attribute vec2 textureCoordinate;
+varying vec2 ftextureCoordinate;
+
+uniform mat4 modelMatrix;
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+
+void main() {
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * position;
+    ftextureCoordinate = textureCoordinate;
+}
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+precision mediump float;
+uniform sampler2D uSampler;
+varying vec2 ftextureCoordinate;
+
+void main() {
+   gl_FragColor = texture2D(uSampler, ftextureCoordinate);
+}
+    </script>
+
+<script>
+    var setScore = () => {};
+    var getScore = () => {};
+    var getMyScore = () => {};
+
+    var alt = 1;
+    var snds = null;
+    var playSound = (boom) => {
+        if(!snds) {
+            snds = [
+                new Audio('./sounds/boom.wav'),
+                new Audio('./sounds/pick1.wav'),
+                new Audio('./sounds/pick2.wav'),
+            ];
+        }
+
+        if(boom) {
+            snds[0].play();
+        } else {
+            snds[alt].play();
+            alt = 3-alt;
+        }
+    };
+
+
+    var gameSize = [500,500];
+    var identity = new Float32Array([
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    ]);
+
+    function getQueryVariable(variable) {
+        var query = window.location.search.substring(1);
+        var vars = query.split('&');
+        for (var i = 0; i < vars.length; i++) {
+            var pair = vars[i].split('=');
+            if (decodeURIComponent(pair[0]) === variable) {
+                return decodeURIComponent(pair[1]);
+            }
+        }
+    }
+
+//    var url = "compiled-globalscene.json";
+
+    var gl = null;
+    var canvasMap = {};
+    var readyCanvas = {};
+    var vertexPositionBuffer, textureCoordinatesBuffer;
+    var vertexArray, texArray;
+    var currentFilename = null;
+    var globalData = {};
+    var loopList = [];
+    var overlay = document.createElement("canvas");
+    var beginningOfTime = 0;
+    var loadsInProgress = {};
+    var shaderProgram;
+
+    function paused() {
+        for(var i in loadsInProgress) {
+            if(loadsInProgress[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    function loadImage(tag, canvas) {
+        var image = new Image();
+        image.src = "assets/" + tag + ".png";
+        loadsInProgress[image.src] = image;
+        image.addEventListener("load", function() {
+            for(var w=1; w<image.naturalWidth;w<<=1) {
+            }
+            for(var h=1; h<image.naturalHeight;h<<=1) {
+            }
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(image,0,0);
+            readyCanvas[tag] = true;
+            delete loadsInProgress[image.src];
+            image = null;
+        });
+    }
+
+    function loadSprite(gl, sprite, globalData) {
+        if(globalData.sprites && globalData.sprites[sprite.name]) {
+            var data = globalData.sprites[sprite.name];
+            startAnimation(gl, data, sprite.position);
+        } else {
+            var filename = "json/" + sprite.name + ".json";
+            var oReq = new XMLHttpRequest();
+            oReq.addEventListener("load", function() {
+                var data = JSON.parse(this.responseText);
+                startAnimation(gl, data, sprite.position);
+
+            });
+            oReq.open("GET", filename, true);
+            oReq.send();
+        }
+    }
+
+    function loadAnimation(filename, canvas) {
+        gl = canvas.getContext('webgl');
+        var vertexShader = getAndCompileShader(gl, 'vertexShader', 'vertex');
+        var fragmentShader = getAndCompileShader(gl, 'fragmentShader', 'fragment');
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            console.log('Could not link shaders');
+        }
+        gl.useProgram(shaderProgram);
+
+        prepareBuffers(gl, shaderProgram);
+
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.enable ( gl.BLEND ) ;
+
+        currentFilename = filename.split("/").pop();
+        var oReq = new XMLHttpRequest();
+        oReq.addEventListener("load", function() {
+            var data = JSON.parse(this.responseText);
+            globalData = data;
+            canvas.width = data.size[0]*2;
+            canvas.height = data.size[1]*2;
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            canvas.style.width = "100vw";
+            canvas.style.height = "100%";
+            canvas.style.backgroundColor = data.backgroundColor;
+            //document.body.appendChild(overlay);
+            overlay.style.position = "absolute";
+            overlay.style.zIndex = 2;
+            overlay.width = canvas.width;
+            overlay.height = canvas.height;
+            overlay.style.width = canvas.style.width;
+            overlay.style.height = canvas.style.height;
+            overlay.style.top = canvas.offsetTop + "px";
+            overlay.style.left = canvas.offsetLeft + "px";
+            var ctx = overlay.getContext("2d");
+            ctx.strokeStyle = "red";
+            ctx.lineWidth = "2";
+            ctx.rect(1,1,overlay.width-2,overlay.height-2);
+            ctx.stroke();
+            console.log(overlay);
+
+            data.elements.forEach(
+                function(sprite) {
+                    loadSprite(gl, sprite, globalData);
+                }
+            );
+
+
+            //console.log(data);
+            /*
+            data = json;
+            var tagCount = 0;
+            json.sprites.forEach(function(sprite) {
+                var tag = sprite[0];
+                if (!canvasMap[tag]) {
+                    var canvas = document.createElement('canvas');
+                    canvas.ready = false;
+                    loadImage(tag, canvas);
+                    canvasMap[tag] = canvas;
+                    tagCount++;
+                }
+            });
+
+            startAnimation(data);
+            */
+            requestAnimationFrame(refresh);
+
+        });
+        oReq.open("GET", filename, true);
+        oReq.send();
+    }
+
+    function getOldestTextureObj(textureCaches) {
+        var oldTime = Number.MAX_VALUE;
+        var textureObj = null;
+        textureCaches.forEach(function(obj) {
+            if(oldTime > obj.time) {
+                oldTime = obj.time;
+                textureObj = obj;
+            }
+        });
+        return textureObj;
+    }
+
+    function uploadTexture(imageCanvas, index, texture) {
+        gl.activeTexture(gl["TEXTURE"+index]);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageCanvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    }
+
+    var textureCaches = [];
+    var textureCacheMap = {};
+    var textureTag = null;
+    function refreshTexture(gl, imageCanvas, sprite, time) {
+        if(textureTag !== sprite[0]) {
+            textureTag = sprite[0];
+            var index = null;
+            if(textureCacheMap[textureTag] !== undefined) {
+                index = textureCacheMap[textureTag];
+            } else {
+                var texture;
+                if (textureCaches.length < 16) {
+                    index = textureCaches.length;
+                    texture = gl.createTexture();
+                    uploadTexture(imageCanvas, index, texture);
+                    textureCacheMap[textureTag] = index;
+                    textureCaches.push({
+                        index: index,
+                        tag: textureTag,
+                        texture: texture,
+                        time: time,
+                    });
+                } else {
+                    var textureObj = getOldestTextureObj(textureCaches);
+                    index = textureObj.index;
+                    texture = textureObj.texture;
+                    uploadTexture(imageCanvas, index, texture);
+                    delete textureCacheMap[textureObj.tag];
+                    textureCacheMap[textureTag] = index;
+                    textureObj.tag = textureTag;
+                }
+            }
+            gl.uniform1i(gl.getUniformLocation(shaderProgram, 'uSampler'), index);
+            textureCaches[index].time = time;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordinatesBuffer);
+
+        texArray[0] = texArray[6] = sprite[1] / imageCanvas.width;
+        texArray[1] = texArray[3] = (sprite[2] + sprite[4]) / imageCanvas.height;
+        texArray[2] = texArray[4] = (sprite[1] + sprite[3]) / imageCanvas.width;
+        texArray[5] = texArray[7] = sprite[2] / imageCanvas.height;
+        gl.bufferData(gl.ARRAY_BUFFER, texArray, gl.STATIC_DRAW);
+    }
+
+    function prepareBuffers(gl, shaderProgram) {
+        vertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexPositionBuffer);
+        vertexArray = new Float32Array([
+            -1, -1, 0,
+            1, -1, 0,
+            1,  1, 0,
+            -1,  1, 0
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, vertexArray, gl.STATIC_DRAW);
+
+        textureCoordinatesBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordinatesBuffer);
+        texArray = new Float32Array([
+            0.0, 0.0,
+            1.0, 0.0,
+            1.0, 1.0,
+            0.0, 1.0
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, texArray, gl.STATIC_DRAW);
+
+        var vertexIndicesBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, vertexIndicesBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array([0,1,2,0,2,3]), gl.STATIC_DRAW);
+
+        var positionAttributeLocation = gl.getAttribLocation(shaderProgram, 'position');
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexPositionBuffer);
+        gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
+
+        var textureCoordinateAttributeLocation = gl.getAttribLocation(shaderProgram, 'textureCoordinate');
+        gl.enableVertexAttribArray(textureCoordinateAttributeLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordinatesBuffer);
+        gl.vertexAttribPointer(textureCoordinateAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "projectionMatrix"), false, identity);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "modelMatrix"), false, identity);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shaderProgram, "viewMatrix"), false, identity);
+    }
+
+    function setPosition(gl, xPos, yPos, vertextPositionBuffer, vertexArray, rect, imageCanvas, globalCanvas) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexPositionBuffer);
+        var s = .5 * scale;
+        for(var i=0; i<rect.length; i++) {
+            var x = 2*(2 * (rect[i][0]*s + xPos) / globalCanvas.width)-1;
+            var y = 2*(1 - 2 * (rect[i][1]*s + yPos) / globalCanvas.height)-1;
+            vertexArray[i*3] = x;
+            vertexArray[i*3 + 1] = y;
+        }
+
+        gl.bufferData(gl.ARRAY_BUFFER, vertexArray, gl.STATIC_DRAW);
+    }
+
+    var info = document.createElement('div');
+    document.body.appendChild(info);
+
+    function display(gl, xPos, yPos, data, globalCanvas, frameObject, frameIdToLabel, time) {
+        var tag = data.sprites[frameObject.tag][0];
+        var imageCanvas = canvasMap[tag];
+        if(imageCanvas && readyCanvas[tag]) {
+            refreshTexture(gl, imageCanvas, data.sprites[frameObject.tag], time);
+            setPosition(gl, xPos, yPos, vertexPositionBuffer, vertexArray,
+                frameObject.rect, imageCanvas, globalCanvas);
+            gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+            return true;
+        }
+        return false;
+    }
+
+    function startAnimation(gl, data, position) {
+        //  loadImages
+        var tagCount = 0;
+        data.sprites.forEach(function(sprite) {
+            var tag = sprite[0];
+            if (!canvasMap[tag]) {
+                var canvas = document.createElement('canvas');
+                canvas.ready = false;
+                loadImage(tag, canvas);
+                canvasMap[tag] = canvas;
+                tagCount++;
+            }
+        });
+
+        // prepare animation
+        var frameIdToFrame = [];
+        var frameIdToLabel = [];
+        var lastFrameIndex = -1;
+        var label = null;
+        for(var i=1; i <= data.frameCount; i++) {
+            var nextFrameIndex = lastFrameIndex+1;
+            var nextFrame = data.frames[nextFrameIndex];
+            if(nextFrame && i>= nextFrame.frame) {
+                lastFrameIndex = nextFrameIndex;
+            }
+
+            if(data.frames[lastFrameIndex].label) {
+                label = data.frames[lastFrameIndex].label;
+            }
+            frameIdToFrame[i] = data.frames[lastFrameIndex];
+            frameIdToLabel[i] = label;
+        }
+
+/*        var canvas = document.getElementById('canvas');
+        canvas.width = 600;//data.size[0];
+        canvas.height = 900;//data.size[1];
+        canvas.style.width = (canvas.width / 2) + "px";
+        canvas.style.height = (canvas.height / 2) + "px";
+        */
+
+        loopList.push({
+            data: data,
+            frameIdToFrame: frameIdToFrame,
+            frameIdToLabel: frameIdToLabel,
+            position: position,
+        });
+    }
+
+    var scale = 1;
+
+    function checkSize() {
+        if(canvas.width !== canvas.offsetWidth*2 || canvas.height !== canvas.offsetHeight*2) {
+            canvas.width = canvas.offsetWidth*2;
+            canvas.height = canvas.offsetHeight*2;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            scale = Math.max(canvas.offsetWidth/gameSize[0], canvas.offsetHeight/gameSize[1]);
+        }
+    }
+
+    var globalCanvas = document.getElementById('canvas');
+    function refresh(time) {
+        if(!paused()) {
+            checkSize();
+            refreshMap(time);
+            var globalFrame = Math.floor((time - beginningOfTime) * globalData.fps / 1000);
+            loopList.forEach(function(obj, index) {
+                if (!obj.hidden) {
+                    var frame;
+                    if(obj.time) {
+                        frame = Math.floor((time - obj.time) * globalData.fps / 1000);
+                    } else {
+                        frame = globalFrame;
+                    }
+                    var frameId = obj.frame ? obj.frame : 1 + frame % obj.data.frameCount;
+                    var frameObject = obj.frameIdToFrame[frameId];
+                    if (display(gl, obj.x, obj.y, obj.data, globalCanvas, frameObject, obj.frameIdToLabel, time)) {
+                        obj.lastFrameIndex = frameObject.frame;
+                    }
+                }
+            });
+        }
+        requestAnimationFrame(refresh);
+    }
+
+    var killed = 0;
+    var gone = 0;
+
+    function getAndCompileShader(gl, id, shaderType) {
+        var shaderElement = document.getElementById(id);
+        var shaderText = shaderElement.text.trim();
+        var shader = gl.createShader(
+            shaderType==='vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER
+        );
+        gl.shaderSource(shader, shaderText);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.log(gl.getShaderInfoLog(shader));
+            return true;
+        }
+        return shader;
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+//        loadAnimation(url, document.getElementById("canvas"));
+    });
+
+    function shake(elem, n) {
+        if(n===undefined) {
+            n = 10;
+        }
+        if(!elem.org) {
+            elem.org = [elem.position[0], elem.position[1]];
+        }
+        elem.position[0] = elem.org[0] + n * (Math.random()-.5);
+        elem.position[1] = elem.org[1] + n * (Math.random()-.5);
+        if(n > 0) {
+            setTimeout(shake, 100, elem, n-1);
+        }
+    }
+
+    function shakeSlime(elem, n, callback) {
+        if(n===undefined) {
+            n = 10;
+        }
+        if(!elem.org) {
+            elem.org = {x:elem.x, y:elem.y};
+        }
+        elem.x = elem.org.x + n * (Math.random()-.5);
+        elem.y = elem.org.y + n * (Math.random()-.5);
+        if(n > 0) {
+            elem.org = null;
+            setTimeout(shakeSlime, 100, elem, n-1);
+            callback(elem);
+        }
+    }
+
+    function showScore() {
+        document.getElementById('score').innerText = "SCORE: " + score + "\nBEST: " + best;
+    }
+
+    var best = localStorage.getItem('best') || 0;
+    var inited = false;
+    var foeSpeed = 2;
+    var gameOver = 0;
+    var score = 0;
+    var stop = false;
+    var canRestart = false;
+    var lastTime = 0;
+    function refreshMap(time) {
+        var dt = time-lastTime;
+        var speedFactor = dt/16;
+        lastTime = time;
+        if(gameOver) {
+            var sec = Math.round((1000 - (time - gameOver))/1000);
+            if(sec <= 0 && !stop) {
+                stop = true;
+                canRestart = true;
+                document.getElementById('score').innerText = "GAME OVER.\nFinal score: " + score + "\nBest score: " + best;// + "\nThe game will restart in " + sec + " secs\n";
+
+                setScore(score, () => {
+                    getScore(leaderBoard => {
+                        document.getElementById('score').innerHTML +=
+                            "<br><hr><br>\n" +
+                            leaderBoard.map(entry => {
+                                return "<div style='display:flex; flex-direction: row'><div style='width: 30px'>"
+                                    + entry.rank + "</div><img src='"
+                                    + entry.pic + "' style='width:20px;height:20px' /><div>"
+                                + entry.name + ": " + entry.score + "</div></div>";
+                            }).join("\n");
+//                        console.log(leaderBoard);
+                    });
+                });
+
+//                location.reload();
+                return;
+            }
+            return;
+        }
+        if(!inited) {
+            inited = true;
+            loopList.forEach(function(obj) {
+                obj.hidden = false;
+                obj.dx = obj.dy = 0;
+                delete obj.frame;
+                obj.x = obj.position[0];
+                obj.y = obj.position[1];
+            });
+            loopList[0].x =200;
+            loopList[0].y =200;
+            loopList[0].frame = 10;
+            loopList[1].dx = 0;
+            loopList[1].dy = foeSpeed*scale;
+            loopList[1].reset = time;
+            loopList[3].hidden = true;
+            loopList[4].hidden = true;
+            stop = false;
+            gameOver = false;
+            score = 0;
+            showScore();
+        }
+        var speed = 5*scale*speedFactor;
+
+        switch(mDown)
+        {
+            case 0:
+                loopList[0].frame = 1;
+                break;
+            case 1:
+                loopList[0].x+=speed;
+                loopList[0].frame = 50;
+                break;
+            case 2:
+                loopList[0].y-=speed;
+                loopList[0].frame = 14;
+                break;
+            case 3:
+                loopList[0].y+=speed;
+                loopList[0].frame = 24;
+                break;
+            case 4:
+                loopList[0].frame = 40;
+                loopList[0].x-=speed;
+                break;
+        }
+        loopList[0].x = (loopList[0].x+canvas.width/2)%(canvas.width/2);
+        loopList[0].y = (loopList[0].y+canvas.height/2)%(canvas.height/2);
+
+
+        loopList[1].x += loopList[1].dx;
+        loopList[1].y += loopList[1].dy;
+
+        loopList[1].x = (loopList[1].x+canvas.width/2)%(canvas.width/2);
+        loopList[1].y = (loopList[1].y+canvas.height/2)%(canvas.height/2);
+        if(time - loopList[1].reset > 2000) {
+//            loopList[1].reset = time;
+            if(Math.abs(loopList[1].x - loopList[0].x) < 10*scale
+                && Math.abs(loopList[1].y - loopList[0].y) < 10*scale) {
+                loopList[0].hidden = true;
+                loopList[4].hidden = false;
+                loopList[1].hidden = true;
+                loopList[4].x = loopList[0].x;
+                loopList[4].y = loopList[0].y;
+                gameOver = time;
+                playSound(true);
+            }
+
+
+                if(Math.abs(loopList[1].x - loopList[0].x) < 10*scale) {
+                loopList[1].dx = 0;
+                if(loopList[1].y < loopList[0].y) {
+                    loopList[1].dy = foeSpeed*scale*speedFactor;
+                } else {
+                    loopList[1].dy = -foeSpeed*scale*speedFactor;
+                }
+             } else if(Math.abs(loopList[1].y - loopList[0].y) < 10*scale) {
+                loopList[1].dy = 0;
+                if(loopList[1].x < loopList[0].x) {
+                    loopList[1].dx = foeSpeed*scale*speedFactor;
+                } else {
+                    loopList[1].dx = -foeSpeed*scale*speedFactor;
+                }
+            }
+        }
+
+
+        if(Math.abs(loopList[2].x - loopList[0].x) < 30*scale
+            && Math.abs(loopList[2].y - loopList[0].y) < 30*scale) {
+            score++;
+            best = Math.max(score, best);
+            localStorage.setItem('best', best);
+            showScore();
+
+            loopList[3].x = loopList[2].x;
+            loopList[3].y = loopList[2].y;
+            loopList[3].hidden = false;
+            loopList[3].time = time;
+            loopList[2].x = Math.random()*canvas.width/2;
+            loopList[2].y = Math.random()*canvas.height/2;
+            playSound(false);
+        }
+
+        if(time - loopList[3].time > 500) {
+            loopList[3].hidden = true;
+        }
+    }
+
+    function getMap(x,y) {
+        return rand(x,y) < .5;
+    }
+
+    function rand(xx, yy) {
+        var seed = xx*123 + yy * 123213;
+        var x = Math.sin(seed++) * 10001;
+        return x - Math.floor(x);
+    }
+
+
+    window.focus();
+    addEventListener("touchstart", move);
+    addEventListener("touchend", move);
+    addEventListener("mouseup", move);
+    addEventListener("mousedown", move);
+    addEventListener("keydown", move);
+    addEventListener("keyup", move);
+    addEventListener("mousemove", preventDrag);
+    addEventListener("touchmove", preventDrag);
+    addEventListener("contextmenu", preventDrag);
+
+    function preventDrag(e) {
+        if(e.stopPropagation) e.stopPropagation();
+        if(e.preventDefault) e.preventDefault();
+        e.cancelBubble=true;
+        e.returnValue=false;
+        return false;
+    }
+
+    var mDown = 0;
+    function move(e) {
+        preventDrag(e);
+        if(canRestart) {
+            canRestart = false;
+            inited = false;
+            gameOver = false;
+            return;
+        }
+        var up = e.type === "keyup" || e.type==="mouseup" || e.type==="touchend";
+        mDown = up ? 0 : mDown || Math.floor(Math.random()*4 + 1);
+//        console.log(mDown);
+    }
+    var time = 0;
+
+
+
+    var crazy = false;
+//    setInterval(function() { crazy = !crazy }, 10000);
+
+</script>
+<!--script src="lib/fbinstant.6.0.mock.js"></script-->
+<script src="https://connect.facebook.net/en_US/fbinstant.6.0.js"></script>
+<script src="lib/facebook.js"></script>
+
+</body>

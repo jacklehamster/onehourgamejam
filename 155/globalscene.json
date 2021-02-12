@@ -1,0 +1,55 @@
+{
+	"fps": 40,
+	"elements": [
+		{
+			"position": [
+				496.4,
+				210.15
+			],
+			"name": "bot1",
+			"frame": 1,
+			"type": "bot"
+		},
+		{
+			"position": [
+				129.05,
+				204.65
+			],
+			"name": "bad2",
+			"frame": 1,
+			"type": "bad"
+		},
+		{
+			"position": [
+				321.45,
+				152.1
+			],
+			"name": "bul3",
+			"frame": 1,
+			"type": "bul"
+		},
+		{
+			"position": [
+				296.35,
+				308.9
+			],
+			"name": "heart4",
+			"frame": 1,
+			"type": "heart"
+		},
+		{
+			"position": [
+				414,
+				337.95
+			],
+			"name": "shortcircuit5",
+			"frame": 1,
+			"type": "shortcircuit"
+		}
+	],
+	"backgroundColor": "#ccffff",
+	"size": [
+		600,
+		450
+	]
+}
