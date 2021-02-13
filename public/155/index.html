@@ -32,15 +32,17 @@
             -webkit-user-select: none
         }
     </style>
+    <script src="lib/focus-fixer.js"></script>
 </head>
 <body style="margin: 0">
-<div style="height: 100vh; display: flex; flex-direction: column">
+    <div id="screen" src="1200X627.png" style="position: absolute"></div>
+<div style="width: 800px; height: 600px; display: flex; flex-direction: column">
     <div id="header" style="padding: 20px; background-color: black; color: white; display: flex">
         <div>Random Controls</div>
         <img style="margin-left: 30px; width: 40px; height: 50px" src="dice.gif">
     </div>
     <div style="display:flex; flex-direction: row; flex: 1">
-        <div id="score" style="position:absolute; margin: 20px"></div>
+        <div id="score" style="font-size: 40pt; opacity: .5; position:absolute; margin: 20px"></div>
         <div>
             <canvas class="animation" id="canvas">
             </canvas>
@@ -48,6 +50,11 @@
     </div>
     <div id="fb-header" style="height: 100px;  background-color: black; color: white"></div>
 </div>
+<script>
+        new FocusFixer(document.getElementById("canvas"));
+</script>
+
+
 <script id="vertexShader" type="x-shader/x-vertex">
 attribute vec4 position;
 attribute vec2 textureCoordinate;
@@ -207,8 +214,10 @@ void main() {
 
             gl.viewport(0, 0, canvas.width, canvas.height);
 
-            canvas.style.width = "100vw";
+            canvas.style.width = "100%";
             canvas.style.height = "100%";
+            // canvas.style.width = "100vw";
+            // canvas.style.height = "100%";
             canvas.style.backgroundColor = data.backgroundColor;
             //document.body.appendChild(overlay);
             overlay.style.position = "absolute";
@@ -541,7 +550,9 @@ void main() {
     var stop = false;
     var canRestart = false;
     var lastTime = 0;
+    let now = 0;
     function refreshMap(time) {
+        now = Math.floor(time / 5000 * 37);
         var dt = time-lastTime;
         var speedFactor = dt/16;
         lastTime = time;
@@ -595,25 +606,43 @@ void main() {
         }
         var speed = 5*scale*speedFactor;
 
-        switch(mDown)
+        switch(mDown || getRand())
         {
             case 0:
                 loopList[0].frame = 1;
                 break;
             case 1:
-                loopList[0].x+=speed;
+                loopList[0].x+=speed / 3;
                 loopList[0].frame = 50;
                 break;
             case 2:
-                loopList[0].y-=speed;
+                loopList[0].y-=speed / 3;
                 loopList[0].frame = 14;
                 break;
-            case 3:
-                loopList[0].y+=speed;
+            case 4:
+                loopList[0].y+=speed / 3;
                 loopList[0].frame = 24;
                 break;
-            case 4:
+            case 3:
                 loopList[0].frame = 40;
+                loopList[0].x-=speed / 3;
+                break;
+        }
+
+        switch(mDown)
+        {
+            case 0:
+                break;
+            case 1:
+                loopList[0].x+=speed;
+                break;
+            case 2:
+                loopList[0].y-=speed;
+                break;
+            case 4:
+                loopList[0].y+=speed;
+                break;
+            case 3:
                 loopList[0].x-=speed;
                 break;
         }
@@ -709,6 +738,11 @@ void main() {
         return false;
     }
 
+    function getRand() {
+        return now % 4 + 1;
+//        return Math.floor(Math.random()*4 + 1);
+    }
+
     var mDown = 0;
     function move(e) {
         preventDrag(e);
@@ -719,7 +753,7 @@ void main() {
             return;
         }
         var up = e.type === "keyup" || e.type==="mouseup" || e.type==="touchend";
-        mDown = up ? 0 : mDown || Math.floor(Math.random()*4 + 1);
+        mDown = up ? 0 : mDown || getRand();
 //        console.log(mDown);
     }
     var time = 0;
@@ -733,5 +767,6 @@ void main() {
 <!--script src="lib/fbinstant.6.0.mock.js"></script-->
 <script src="https://connect.facebook.net/en_US/fbinstant.6.0.js"></script>
 <script src="lib/facebook.js"></script>
-
+<script src="lib/newgrounds/newgroundsio.min.js"></script>
+<script src="lib/newgrounds/ng.js"></script>
 </body>
